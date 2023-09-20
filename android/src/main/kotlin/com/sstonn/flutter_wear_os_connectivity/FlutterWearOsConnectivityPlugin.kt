@@ -869,7 +869,7 @@ class FlutterWearOsConnectivityPlugin : FlutterPlugin, MethodCallHandler, Activi
 
     companion object {
         @JvmStatic
-        fun registerWith(io.flutter.plugin.common.PluginRegistry.Registrar registrar) {
+        fun registerWith(registrar: io.flutter.plugin.common.PluginRegistry.Registrar) {
             val channel = MethodChannel(registrar.messenger(), "sstonn/flutter_wear_os_connectivity")
             val plugin = FlutterWearOsConnectivityPlugin()
             channel.setMethodCallHandler(plugin)
