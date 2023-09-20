@@ -14,22 +14,11 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.io.*
 import kotlin.coroutines.CoroutineContext
 import kotlin.io.path.pathString
-import android.content.Intent
-import android.app.Service
-import android.os.IBinder
-import android.os.Binder
-import androidx.core.content.ContextCompat
-
-
-
-
-import com.sstonn.flutter_wear_os_connectivity.*
 
 class FlutterWearOsConnectivityPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var channel: MethodChannel
@@ -83,14 +72,12 @@ class FlutterWearOsConnectivityPlugin : FlutterPlugin, MethodCallHandler, Activi
                 result.success(true)
             }
             "configure" -> {
+                // Initialize all clients
                 activityBinding?.let { it ->
                     messageClient = Wearable.getMessageClient(it.activity)
                     nodeClient = Wearable.getNodeClient(it.activity)
                     dataClient = Wearable.getDataClient(it.activity)
                     capabilityClient = Wearable.getCapabilityClient(it.activity)
-
-                    val serviceIntent = Intent(it.activity, FlutterWearOsConnectivityService::class.java)
-                    ContextCompat.startForegroundService(it.activity, serviceIntent)
                 }
                 result.success(null)
             }

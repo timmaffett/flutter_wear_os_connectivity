@@ -1,13 +1,3 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
   package="com.sstonn.flutter_wear_os_connectivity">
-
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-
-    <application>
-
-        <service
-            android:name=".FlutterWearOsConnectivityService"
-            android:enabled="true"
-            android:foregroundServiceType="location|connectedDevice" />
-    </application>
 </manifest>

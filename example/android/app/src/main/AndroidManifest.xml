@@ -30,8 +30,5 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-
-       <service android:name=".FlutterWearOsConnectivityService" android:enabled="true" android:exported="true"  android:foregroundServiceType="connectedDevice"/>
-
-   </application>
+    </application>
 </manifest>
