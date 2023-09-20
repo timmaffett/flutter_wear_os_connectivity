@@ -867,6 +867,14 @@ class FlutterWearOsConnectivityPlugin : FlutterPlugin, MethodCallHandler, Activi
         return dataMap
     }
 
+    companion object {
+        @JvmStatic
+        fun registerWith(registrar: PluginRegistry.Registrar) {
+            val channel = MethodChannel(registrar.messenger(), "sstonn/flutter_wear_os_connectivity")
+            val plugin = FlutterWearOsConnectivityPlugin()
+            channel.setMethodCallHandler(plugin)
+        }
+    }
 }
 
 
