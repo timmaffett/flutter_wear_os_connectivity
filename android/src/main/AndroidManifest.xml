@@ -1,3 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
   package="com.sstonn.flutter_wear_os_connectivity">
+    <application>
+        <service
+            android:enabled="true"
+            android:exported="true"
+            android:name=".ListenerService"
+            android:stopWithTask="false"
+            />
+    </application>
 </manifest>

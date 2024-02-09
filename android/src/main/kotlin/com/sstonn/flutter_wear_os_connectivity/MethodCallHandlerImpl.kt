@@ -1,112 +1,61 @@
-package com.sstonn.flutter_wear_os_connectivity
+package com.baseflow.geolocator
 
-import android.content.ServiceConnection
-import android.net.Uri
-import android.util.Pair
-import androidx.annotation.NonNull
-import com.google.android.gms.wearable.*
-import com.google.android.gms.wearable.CapabilityClient.FILTER_ALL
-import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.embedding.engine.plugins.activity.ActivityAware
-import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import android.app.Activity
+import android.content.Context
+import android.location.Location
+import android.util.Log
+import androidx.annotation.VisibleForTesting
+import com.baseflow.geolocator.errors.ErrorCodes
+import com.baseflow.geolocator.errors.PermissionUndefinedException
+import com.baseflow.geolocator.location.FlutterLocationServiceListener
+import com.baseflow.geolocator.location.GeolocationManager
+import com.baseflow.geolocator.location.LocationAccuracyStatus
+import com.baseflow.geolocator.location.LocationAccuracyManager
+import com.baseflow.geolocator.location.LocationClient
+import com.baseflow.geolocator.location.LocationMapper
+import com.baseflow.geolocator.location.LocationOptions
+import com.baseflow.geolocator.permission.LocationPermission
+import com.baseflow.geolocator.permission.PermissionManager
+import com.baseflow.geolocator.utils.Utils
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.plugin.common.MethodChannel.Result
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import java.io.*
-import kotlin.coroutines.CoroutineContext
-import kotlin.io.path.pathString
-import io.flutter.Log
+import java.util.HashMap
+import java.util.Map
 
+/**
+ * Translates incoming FlutterWearOsConnectivity MethodCalls into well formed Java function calls for [ ].
+ */
+internal class MethodCallHandlerImpl(
+    permissionManager: PermissionManager,
+    geolocationManager: GeolocationManager,
+    locationAccuracyManager: LocationAccuracyManager
+) : MethodChannel.MethodCallHandler {
+    private val permissionManager: PermissionManager
+    private val geolocationManager: GeolocationManager
+    private val locationAccuracyManager: LocationAccuracyManager
 
-class FlutterWearOsConnectivityPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
-    private lateinit var channel: MethodChannel
-    private lateinit var callbackChannel: MethodChannel
-    private var scope: (CoroutineContext) -> CoroutineScope = {
-        CoroutineScope(it)
-    }
-
-    private val TAG = "FlutterWearOsConnectivity"
-
-
-    //Clients needed for Data Layer API
-    private lateinit var messageClient: MessageClient
-    private lateinit var nodeClient: NodeClient
-    private lateinit var dataClient: DataClient
-    private lateinit var capabilityClient: CapabilityClient
+    @VisibleForTesting
+    val pendingCurrentPositionLocationClients: Map<String?, LocationClient>
 
     @Nullable
-    private var methodCallHandler: MethodCallHandlerImpl? = null
-
-    //Activity and context references
-    private var activityBinding: ActivityPluginBinding? = null
-
-    //Listeners for capability changed
-    private var capabilityListeners: MutableMap<String, CapabilityClient.OnCapabilityChangedListener> =
-        mutableMapOf()
-
-    //Listener for message received
-    private var messageListeners: MutableMap<String, MessageClient.OnMessageReceivedListener?> =
-        mutableMapOf()
-
-    //Listener for data changed
-    private var dataChangeListeners: MutableMap<String, DataClient.OnDataChangedListener?> =
-        mutableMapOf()
+    private var context: Context? = null
 
     @Nullable
-    private var wearosForegroundService: FlutterWearOsConnectivityService? = null
+    private var activity: Activity? = null
 
+    @Nullable
+    private var channel: MethodChannel? = null
 
-    private val serviceConnection: ServiceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            Log.d(TAG, "FlutterWearOsConnectivity foreground service connected")
-            if (service is FlutterWearOsConnectivityService.LocalBinder) {
-                initialize((service as FlutterWearOsConnectivityService.LocalBinder).getWearOsConnectivityService())
-            }
-        }
-
-        override fun onServiceDisconnected(name: ComponentName) {
-            Log.d(TAG, "FlutterWearOsConnectivity foreground service disconnected")
-            if (wearosForegroundService != null) {
-                wearosForegroundService.setActivity(null)
-                wearosForegroundService = null
-            }
-        }
+    init {
+        this.permissionManager = permissionManager
+        this.geolocationManager = geolocationManager
+        this.locationAccuracyManager = locationAccuracyManager
+        pendingCurrentPositionLocationClients = HashMap()
     }
 
-    private fun initialize(service: FlutterWearOsConnectivityService) {
-        Log.d(TAG, "Initializing FlutterWearOsConnectivity services")
-        wearosForegroundService = service
-        wearosForegroundService.flutterEngineConnected()
-        if (streamHandler != null) {
-            streamHandler.setForegroundLocationService(service)
-        }
-    }
-
-    override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        methodCallHandler = MethodCallHandlerImpl(
-            permissionManager, geolocationManager, locationAccuracyManager
-        )
-        channel = MethodChannel(
-            flutterPluginBinding.binaryMessenger,
-            "sstonn/flutter_wear_os_connectivity"
-        )
-        callbackChannel = MethodChannel(
-            flutterPluginBinding.binaryMessenger,
-            "sstonn/flutter_wear_os_connectivity_callback"
-        )
-        channel.setMethodCallHandler(methodCallHandler)
-    }
-
-    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        activityBinding = null
-    }
-
-    override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
+    @Override
+    fun onMethodCall(@NonNull call: MethodCall, @NonNull result: MethodChannel.Result) {
         when (call.method) {
             "isSupported" -> {
                 result.success(true)
@@ -702,220 +651,30 @@ class FlutterWearOsConnectivityPlugin : FlutterPlugin, MethodCallHandler, Activi
         }
     }
 
-    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        this.activityBinding = binding
-    }
-
-    override fun onDetachedFromActivityForConfigChanges() {
-        activityBinding = null
-    }
-
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        this.activityBinding = binding
-    }
-
-    override fun onDetachedFromActivity() {
-        activityBinding = null
-    }
-
-    private fun fromDataMap(dataMap: DataMap): Pair<HashMap<String, *>, HashMap<String, *>> {
-        val hashMap: HashMap<String, Any> = HashMap()
-        var assets: HashMap<String, Any?> = HashMap()
-        for (key in dataMap.keySet()) {
-            val data = dataMap.get<Any>(key)
-            data?.let {
-                if (it is Asset) {
-                    assets = hashMapOf(
-                        "asset" to it,
-                        "extension" to dataMap.get<String>("extension")
-                    )
-                    return@let
-                } else if (it is DataMap) {
-                    val childMapPair = fromDataMap(it)
-                    if (key.indexOf("file#") == 0) {
-                        assets[key] = childMapPair.second
-                    } else {
-                        hashMap[key] = childMapPair.first
-                    }
-                    return@let
-                }
-                hashMap[key] = it
-            }
+    fun startListening(context: Context?, messenger: BinaryMessenger?) {
+        if (channel != null) {
+            Log.w(TAG, "Setting a method call handler before the last was disposed.")
+            stopListening()
         }
-        return Pair(hashMap, assets)
+        channel = MethodChannel(messenger, "sstonn/flutter_wear_os_connectivity")
+        channel.setMethodCallHandler(this)
+        this.context = context
     }
 
-    private fun copyStreamToFile(inputStream: InputStream, extension: String): File {
-        val outputPath = kotlin.io.path.createTempFile("smart-watch-temp-file-", extension)
-        val outputFile = File(outputPath.pathString)
-        inputStream.use { input ->
-            val outputStream = FileOutputStream(outputFile)
-            outputStream.use { output ->
-                val buffer = ByteArray(4 * 1024) // buffer size
-                while (true) {
-                    val byteCount = input.read(buffer)
-                    if (byteCount < 0) break
-                    output.write(buffer, 0, byteCount)
-                }
-                output.flush()
-            }
-            outputStream.close()
+    fun stopListening() {
+        if (channel == null) {
+            Log.d(TAG, "Tried to stop listening when no MethodChannel had been initialized.")
+            return
         }
-        inputStream.close()
-        return outputFile
+        channel.setMethodCallHandler(null)
+        channel = null
     }
 
-
-    private fun List<DataEvent>.toRawEventList(): List<Map<String, Any>> {
-        return map {
-            mapOf(
-                "type" to it.type,
-                "dataItem" to it.dataItem.toRawMap(),
-                "isDataValid" to it.isDataValid
-            )
-
-        }
-    }
-
-    private fun MessageEvent.toRawData(): Map<String, Any> {
-        return mapOf(
-            "data" to data,
-            "path" to path,
-            "requestId" to this.requestId,
-            "sourceNodeId" to this.sourceNodeId
-        )
-    }
-
-    private fun Node.toRawMap(): Map<String, Any> {
-        return mapOf(
-            "name" to displayName,
-            "isNearby" to isNearby,
-            "id" to id
-        )
-    }
-
-    private fun CapabilityInfo.toRawMap(): Map<String, Any> {
-        return mapOf(
-            "name" to this.name,
-            "associatedNodes" to this.nodes.map { it.toRawMap() }
-        )
-    }
-
-    private fun DataItem.toRawMap(): HashMap<String, Any?> {
-        val mapDataItem = DataMapItem.fromDataItem(this)
-
-        val finalMap: HashMap<String, Any?> = hashMapOf(
-            "uri" to uri.toString(),
-        )
-        val dataItemMap: HashMap<String, Any?> = hashMapOf(
-        )
-        if (data != null) {
-            dataItemMap.putAll(hashMapOf("data" to data!!))
-            dataItemMap.putAll(mapDataItem.toRawMap())
-        }
-        finalMap.putAll(dataItemMap)
-        return finalMap
-    }
-
-    private fun DataMapItem.toRawMap(): HashMap<String, Any> {
-        val dataMapPair = fromDataMap(dataMap)
-        return hashMapOf(
-            "uri" to uri.toString(),
-            "map" to dataMapPair.first,
-            "assets" to dataMapPair.second
-        )
-    }
-
-
-    private fun HashMap<*, String>.toFileDataMap(): DataMap {
-        val dataMap = DataMap()
-        for ((key, value) in this) {
-            val file = File(value)
-            if (file.exists()) {
-                val fileDataMap = DataMap()
-                val randomFile = RandomAccessFile(file, "r")
-                val fileBytes = ByteArray(randomFile.length().toInt())
-                randomFile.read(fileBytes)
-                fileDataMap.putString("extension", file.extension)
-                fileDataMap.putAsset(
-                    "asset", Asset.createFromBytes(
-                        fileBytes
-                    )
-                )
-                dataMap.putDataMap("file#$key", fileDataMap)
-            }
-        }
-        return dataMap
-    }
-
-    private fun HashMap<*, *>.toDataMap(): DataMap {
-        val dataMap = DataMap()
-        for ((key, value) in this) {
-            when (value) {
-                is String -> {
-                    dataMap.putString(key.toString(), value)
-                }
-                is Boolean -> {
-                    dataMap.putBoolean(key.toString(), value)
-                }
-                is Int -> {
-                    dataMap.putInt(key.toString(), value)
-                }
-                is Double -> {
-                    dataMap.putDouble(key.toString(), value)
-                }
-                is Long -> {
-                    dataMap.putLong(key.toString(), value)
-                }
-                is ByteArray -> {
-                    dataMap.putByteArray(key.toString(), value)
-                }
-                is FloatArray -> {
-                    dataMap.putFloatArray(key.toString(), value)
-                }
-                is LongArray -> {
-                    dataMap.putLongArray(key.toString(), value)
-                }
-                is HashMap<*, *> -> {
-                    dataMap.putDataMap(
-                        key.toString(),
-                        (value).toDataMap()
-                    )
-                }
-                is List<*> -> {
-                    if ((value).isEmpty()) continue
-                    @Suppress("UNCHECKED_CAST")
-                    if ((value).all { it is String }) {
-                        dataMap.putStringArray(
-                            key.toString(),
-                            (value as List<String>).toTypedArray()
-                        )
-                    } else if ((value).all { it is HashMap<*, *> }) {
-                        dataMap.putDataMapArrayList(
-                            key.toString(),
-                            ArrayList((value as List<HashMap<*, *>>).map { it.toDataMap() })
-                        )
-                    } else if ((value).all { it is Int }) {
-                        dataMap.putIntegerArrayList(
-                            key.toString(),
-                            ArrayList(value as List<Int>)
-                        )
-                    }
-                }
-            }
-        }
-        return dataMap
+    fun setActivity(@Nullable activity: Activity?) {
+        this.activity = activity
     }
 
     companion object {
-        @JvmStatic
-        fun registerWith(registrar: io.flutter.plugin.common.PluginRegistry.Registrar) {
-            val channel = MethodChannel(registrar.messenger(), "sstonn/flutter_wear_os_connectivity")
-            val plugin = FlutterWearOsConnectivityPlugin()
-            channel.setMethodCallHandler(plugin)
-        }
+        private const val TAG = "MethodCallHandlerImpl"
     }
 }
-
-
-
